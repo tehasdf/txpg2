@@ -11,8 +11,8 @@ def main(reactor):
     ep = UNIXClientEndpoint(reactor, '/var/run/postgresql/.s.PGSQL.5432')
     fact = ClientFactory.forProtocol(PostgresProtocol)
     proto = yield ep.connect(fact)
-    res = yield proto.runQuery('SELECT 1, \'qwe\'')
-    print 'res', res
+    # for i in range(5000):
+    res = yield proto.runQuery('SELECT * from entries limit 5')
 
 
 react(main)

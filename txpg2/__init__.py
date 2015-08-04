@@ -1,10 +1,15 @@
 
 from collections import deque
 from functools import wraps
-from twisted.internet.protocol import Protocol
+import os.path
 import struct
+
+from twisted.internet.protocol import Protocol
 from twisted.protocols.stateful import StatefulProtocol
 from twisted.internet.defer import DeferredQueue, Deferred
+
+from cffi import FFI
+
 
 def handler(f):
     @wraps(f)
@@ -12,6 +17,23 @@ def handler(f):
         f(self, data)
         return self.getInitialState()
     return inner
+
+
+ffi = FFI()
+
+incl_dir = os.path.dirname(__file__)
+ffi.cdef(open(os.path.join(incl_dir, 'txpg2.h')).read())
+
+
+lib = ffi.verify("""
+        #include "txpg2.h"
+    """,
+    include_dirs=['.'],
+    sources=['txpg2.c'],
+    relative_to=__file__,
+    extra_compile_args=['-std=c99']
+)
+
 
 class PostgresProtocol(StatefulProtocol):
     def getInitialState(self):
@@ -40,7 +62,6 @@ class PostgresProtocol(StatefulProtocol):
         return handler, length - 4
 
     def connectionMade(self):
-        print 'connected'
         self.parameters = {}
         self.cancellationKey = None
         self.backendPID = None
@@ -127,20 +148,14 @@ class PostgresProtocol(StatefulProtocol):
 
     @handler
     def handle_RowDescription(self, data):
-        numFields = struct.unpack('!h', data[:2])
-        data = data[2:]
-
-        while data:
-            fieldname, null, data = data.partition('\x00')
-            table_oid, attrnum, type_oid, typlen, typmod, formatCode = struct.unpack('!IhIhIh', data[:18])
-            data = data[18:]
-            self._currentRowDescription.append(fieldname)
+        self._currentRowDescription = lib.parse_rowDescription(data, len(data))
 
     @handler
     def handle_DataRow(self, data):
-        numCols = struct.unpack('!h', data[:2])
+        numCols = struct.unpack('!h', data[:2])[0]
         data = data[2:]
         row = []
+        lib.x(numCols, ffi.new('char[]', data))
         while data:
             fieldLen = struct.unpack('!I', data[:4])[0]
             fieldData = data[4:4 + fieldLen]
